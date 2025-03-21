@@ -1,4 +1,7 @@
 defmodule EventTimer.IdType do
+  @moduledoc """
+  A type to store a value as a string but load it as an int.
+  """
   @behaviour Ecto.Type
 
   def type, do: :string

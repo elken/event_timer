@@ -1,4 +1,11 @@
 defmodule EventTimer.Channel do
+  @moduledoc """
+  A representation of a Discord Channel.
+
+  We also cache when the next update should occur, in an attempt to work around Discord's frankly unfair rate limits.
+  """
+  @type t() :: EventTimer.Channel
+
   use Ecto.Schema
   import Ecto.Changeset
 

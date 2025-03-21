@@ -8,7 +8,17 @@ defmodule EventTimer.MixProject do
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      aliases: aliases()
+      aliases: aliases(),
+      name: "Event Timer",
+      source_url: "https://github.com/elken/event_timer",
+      docs: &docs/0
+    ]
+  end
+
+  defp docs do
+    [
+      main: "EventTimer",
+      extras: ["README.md"]
     ]
   end
 
@@ -32,7 +42,9 @@ defmodule EventTimer.MixProject do
       {:nostrum, github: "Kraigie/nostrum"},
       {:exsync, "~> 0.4", only: :dev},
       {:ecto_sql, "~> 3.10"},
-      {:postgrex, "~> 0.17"}
+      {:postgrex, "~> 0.17"},
+      {:earmark, "~> 1.4", only: :dev},
+      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
 end

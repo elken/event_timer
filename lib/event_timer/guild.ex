@@ -1,4 +1,11 @@
 defmodule EventTimer.Guild do
+  @moduledoc """
+  The top-most entity, most commonly called a "Server".
+
+  Mostly for our purposes it's just a link to events and channels, with a way to store server-specific configuration.
+  """
+  @type t() :: EventTimer.Guild
+  
   use Ecto.Schema
   import Ecto.Changeset
 

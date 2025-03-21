@@ -1,4 +1,9 @@
 defmodule EventTimer.Worker do
+  @moduledoc """
+  A worker server for a Guild.
+
+  Initialized when the main Guild supervisor starts after the bot gets a list of Guilds it is part of.
+  """
   alias Nostrum.Cache.GuildCache
   alias Nostrum.Cache.Me
   use GenServer
@@ -6,25 +11,44 @@ defmodule EventTimer.Worker do
 
   # Public API
 
+  @doc """
+  Start the server and name it based on the Guild ID.
+  """
+  @spec start_link([{:id, String.t()}]) :: GenServer.on_start()
   def start_link(guild) do
     id = Keyword.fetch!(guild, :id)
     GenServer.start_link(__MODULE__, guild, name: worker_name(id))
   end
 
+  @doc """
+  Add a new event for a Guild
+  """
+  @spec add_event(String.t() | integer(), %{code: String.t(), name: String.t(), date: DateTime.t()}) :: term()
   def add_event(id, event) do
     GenServer.call(worker_name(id), {:add, event})
   end
 
+  @doc """
+  Remove an event by code for a Guild
+  """
+  @spec remove_event(String.t() | integer(), String.t()) :: term()
   def remove_event(id, code) do
     GenServer.call(worker_name(id), {:rm, code})
   end
 
+  @doc """
+  Get the name for a worker based on the Guild ID.
+  """
   def worker_name(id) do
     :"EventTimer.Worker::#{id}"
   end
 
   # Server callbacks
 
+  @doc """
+  Initialize the server based on the Guild ID, create the entity in the database if needed and start processing event updates.
+  """
+  @spec init([{:id, String.t()}]) :: {:ok, String.t()}
   @impl true
   def init(guild) do
     id = Keyword.fetch!(guild, :id)
@@ -38,8 +62,6 @@ defmodule EventTimer.Worker do
     {:ok, id}
   end
 
-  # :add
-
   @impl true
   def handle_call({:add, event}, _from, guild_id) do
     {:ok, _event} =
@@ -52,7 +74,6 @@ defmodule EventTimer.Worker do
     {:reply, upsert_channel(guild_id, event), guild_id}
   end
 
-  # :rm
   @impl true
   def handle_call({:rm, code}, _from, guild_id) do
     {:ok, event} =
@@ -67,8 +88,9 @@ defmodule EventTimer.Worker do
     {:reply, EventTimer.Guilds.delete_event(guild_id, code), guild_id}
   end
 
-  # :event_updates
-
+  @doc """
+  The main event loop function. Process all the current events we have and schedule this function to be called again later.
+  """
   @impl true
   def handle_info(:event_updates, guild_id) do
     Logger.info("Starting work for #{guild_id}")
@@ -92,6 +114,7 @@ defmodule EventTimer.Worker do
 
   # Private functions
 
+  @spec upsert_channel(String.t() | integer(), %{code: String.t(), name: String.t(), date: DateTime.t()}) :: EventTimer.Event.t()
   defp upsert_channel(guild_id, event) do
     {:ok, channel} =
       case EventTimer.Guilds.get_channel(guild_id, event.code) do
@@ -107,20 +130,19 @@ defmodule EventTimer.Worker do
     EventTimer.Guilds.get_event(guild_id, event.code, [:channel])
   end
 
+  @spec create_channel(String.t() | integer(), %{code: String.t(), name: String.t(), date: DateTime.t()}) :: EventTimer.Channel.t()
   defp create_channel(guild_id, event) do
     {:ok, guild} = EventTimer.Guilds.get_or_create_guild(to_string(guild_id))
 
     parent_id =
       case guild do
         %{config: %{parent_id: parent_id}} when not is_nil(parent_id) -> parent_id
-        _ -> nil
+        _ ->
+          Logger.error("No parent_id set for #{guild_id}")
+          nil
       end
 
     Logger.info("No channel found for #{event.code}")
-
-    if parent_id == nil do
-      Logger.error("No parent_id set for #{guild_id}")
-    end
 
     {:ok, channel} =
       Nostrum.Api.Channel.create(guild_id,
@@ -138,6 +160,7 @@ defmodule EventTimer.Worker do
     })
   end
 
+  @spec update_channel(String.t() | integer(), EventTimer.Channel.t(), %{code: String.t(), name: String.t(), date: DateTime.t()}) :: EventTimer.Channel.t()
   defp update_channel(guild_id, channel, event) do
     case Nostrum.Api.Channel.get(String.to_integer(channel.id)) do
       {:ok, _} ->
@@ -166,6 +189,7 @@ defmodule EventTimer.Worker do
     end
   end
 
+  @spec channel_permissions(String.t() | integer()) :: [Nostrum.Permission.Overwrite.t()]
   defp channel_permissions(guild_id) do
     {:ok, member} = Nostrum.Api.Guild.member(guild_id, Me.get().id)
     {:ok, guild} = GuildCache.get(guild_id)
@@ -185,6 +209,7 @@ defmodule EventTimer.Worker do
     |> Enum.reverse()
   end
 
+  @spec time_until(DateTime.t()) :: %{days: integer(), hours: integer(), minutes: integer()}
   defp time_until(date) do
     now = DateTime.utc_now()
 
@@ -201,6 +226,7 @@ defmodule EventTimer.Worker do
     %{days: days, hours: hours, minutes: minutes}
   end
 
+  @spec channel_name(%{date: DateTime.t(), code: String.t()}) :: String.t()
   defp channel_name(%{date: date, code: code}) do
     case DateTime.compare(date, DateTime.utc_now()) do
       :gt ->

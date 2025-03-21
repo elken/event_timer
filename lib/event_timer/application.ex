@@ -10,7 +10,7 @@ defmodule EventTimer.Application do
     bot_options = %{
       name: EventTimer,
       consumer: EventTimer.Consumer,
-      intents: [:guilds, :guild_messages, :message_content],
+      intents: [:guilds, :guild_messages],
       wrapped_token: fn -> System.fetch_env!("BOT_TOKEN") end
     }
 

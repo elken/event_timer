@@ -1,4 +1,11 @@
 defmodule EventTimer.Consumer do
+  @moduledoc """
+  The main entry point for our bot.
+
+  Handles all the commands and interactions with the various GenServers we have around.
+
+  Nostrum defines the `handle_event/1` handlers as multiple clauses so you will have to check the code for documentation of each one.
+  """
   @behaviour Nostrum.Consumer
 
   require Logger
@@ -10,9 +17,31 @@ defmodule EventTimer.Consumer do
   alias Nostrum.Api.Interaction
   alias Nostrum.Api.ApplicationCommand
 
+  @doc """
+  Handler for getting a new interaction (application command call).
+
+  The other various commands that are called from this typically return embeds.
+  """
+  @impl true
   def handle_event({:INTERACTION_CREATE, interaction, _ws_state}) do
+    result =
+      case interaction do
+        %{data: %{name: "countdown", options: [%{name: "set-parent"}]}} -> set_parent(interaction)
+        %{data: %{name: "countdown", options: [%{name: "add"}]}} -> add_event(interaction)
+        %{data: %{name: "countdown", options: [%{name: "remove"}]}} -> remove_event(interaction)
+        %{data: %{name: "countdown", options: [%{name: "list"}]}} -> list_events(interaction)
+        _ ->
+          embed =
+            %Nostrum.Struct.Embed{}
+            |> put_title("How did you trigger this?")
+            |> put_color(16_711_680)
+            |> put_timestamp(DateTime.to_iso8601(DateTime.utc_now()))
+
+        {:embed, [embed]}
+      end
+
     data =
-      case do_command(interaction) do
+      case result do
         {:embed, embeds} -> %{embeds: embeds}
         _ -> ":white_check_mark:"
       end
@@ -20,7 +49,8 @@ defmodule EventTimer.Consumer do
     Interaction.create_response(interaction, %{type: 4, data: data})
   end
 
-  def handle_event({:READY, %{guilds: guilds} = _event, _ws_state}) do
+  @impl true
+  def handle_event({:READY, %{guilds: guilds}, _ws_state}) do
     ids =
       guilds
       |> Enum.map(fn guild -> guild.id end)
@@ -38,6 +68,11 @@ defmodule EventTimer.Consumer do
   # Ignore any other events
   def handle_event(_), do: :ok
 
+  @doc """
+  Create the various Guild commands we use.
+
+  For the sake of simplicity also, the remove command gets a list of all the valid events it can delete.
+  """
   def create_guild_commands(guild_id) do
     Logger.info("Setting up commands for #{guild_id}")
 
@@ -145,7 +180,13 @@ defmodule EventTimer.Consumer do
     })
   end
 
-  def do_command(%{
+  @doc """
+  Handle `/countdown set-parent`
+
+  Expects a category channel and sets the parent based on that.
+  """
+  @spec set_parent(Nostrum.Struct.Interaction.t()) :: {:embed, [Nostrum.Struct.Embed.t()]}
+  def set_parent(%{
         guild_id: guild_id,
         data: %{name: "countdown", options: [%{name: "set-parent", options: options}]}
       }) do
@@ -180,7 +221,15 @@ defmodule EventTimer.Consumer do
     end
   end
 
-  def do_command(%{
+  @doc """
+  Handle `/countdown add`
+
+  Add a new event based on the options we pass in, create a new event and return an embed showing the relevant info.
+
+  We also update the guild commands here so that `/countdown remove` has a list of choices available.
+  """
+  @spec add_event(Nostrum.Struct.Interaction.t()) :: {:embed, [Nostrum.Struct.Embed.t()]}
+  def add_event(%{
         guild_id: guild_id,
         data: %{name: "countdown", options: [%{name: "add", options: options}]}
       }) do
@@ -208,11 +257,26 @@ defmodule EventTimer.Consumer do
 
     {:embed,
      [
-       event_embed(event)
+       %Nostrum.Struct.Embed{}
+       |> put_title(event.name)
+       |> put_description(event.code)
+       |> put_timestamp(event.date)
+       |> put_field(
+         "Channel",
+         Nostrum.Struct.Channel.mention(%Nostrum.Struct.Channel{id: event.channel.id})
+       )
      ]}
   end
 
-  def do_command(%{
+  @doc """
+  Handle `/countdown remove`
+
+  Attempt to remove an event if it exists, otherwise return an error embed.
+
+  We also update the commands here so that `/countdown remove` has an up-to-date listing.
+  """
+  @spec remove_event(Nostrum.Struct.Interaction.t()) :: {:embed, [Nostrum.Struct.Embed.t()]}
+  def remove_event(%{
         guild_id: guild_id,
         data: %{name: "countdown", options: [%{name: "remove", options: options}]}
       }) do
@@ -239,11 +303,18 @@ defmodule EventTimer.Consumer do
     {:embed, [embed]}
   end
 
-  def do_command(%{guild_id: guild_id, data: %{name: "countdown", options: [%{name: "list"}]}}) do
-    {:embed, event_embeds(guild_id)}
+  @doc """
+  Handle `/countdown list`
+
+  Get an embed with all the channels in it. The Discord limit for embeds is 10, and the max limit of fields is 25; but I'm not banking on many others using this so I'm fine with the 25 default.
+  """
+  @spec list_events(Nostrum.Struct.Interaction.t()) :: {:embed, [Nostrum.Struct.Embed.t()]}
+  def list_events(%{guild_id: guild_id, data: %{name: "countdown", options: [%{name: "list"}]}}) do
+    {:embed, guild_embed(guild_id)}
   end
 
-  defp event_embed_fields(event) do
+  @spec event_embed_field(EventTimer.Event.t()) :: Nostrum.Struct.Embed.Field.t()
+  defp event_embed_field(event) do
     date = Calendar.strftime(event.date, "%d/%m/%y %I:%M:%S %p")
 
     %Nostrum.Struct.Embed.Field{
@@ -252,42 +323,30 @@ defmodule EventTimer.Consumer do
     }
   end
 
-  defp event_embed(event) do
-    %Nostrum.Struct.Embed{}
-    |> put_title(event.name)
-    |> put_description(event.code)
-    |> put_timestamp(event.date)
-    |> put_field(
-      "Channel",
-      Nostrum.Struct.Channel.mention(%Nostrum.Struct.Channel{id: event.channel.id})
-    )
-  end
-
-  defp event_embeds(guild_id) do
+  @spec guild_embed(String.t() | integer()) :: [Nostrum.Struct.Embed.t()]
+  defp guild_embed(guild_id) do
     {:ok, events} =
       EventTimer.Guilds.get_events(guild_id)
 
-    case events do
-      [] ->
-        [
+    [
+      case events do
+        [] ->
           %Nostrum.Struct.Embed{}
           |> put_title("No events added yet")
           |> put_description("Add some events to see something useful here instead.")
           |> put_timestamp(DateTime.to_iso8601(DateTime.utc_now()))
           |> put_color(16_711_680)
-        ]
 
-      _ ->
-        [
+        _ ->
           %Nostrum.Struct.Embed{
             title: "Current Events",
             description: "The current list of ongoing events and their channels",
             timestamp: DateTime.to_iso8601(DateTime.utc_now()),
             color: 65280,
-            fields: Enum.map(events, &event_embed_fields/1)
+            fields: Enum.map(events, &event_embed_field/1)
           }
-        ]
-    end
+      end
+    ]
   end
 
   defp event_choices(guild_id) do
